@@ -25,9 +25,10 @@ RUN rm -f /sbin/apk && \
     rm -rf /lib/apk && \
     rm -rf /usr/share/apk && \
     rm -rf /var/lib/apk
-    
+
 COPY --from=base /app/myapp /home/nonroot/gohtmx
 COPY --from=base /app/src/templates /home/nonroot/templates
+COPY --from=base /app/src/static /home/nonroot/static
 EXPOSE 3000
 RUN addgroup --system nonroot && \
     adduser --system --ingroup nonroot nonroot
