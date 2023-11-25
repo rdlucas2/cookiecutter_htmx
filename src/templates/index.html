@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <title>RL | {{ .Title }}</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta name="description" content="{{ .Description }}" />
+  <link rel="icon" href="/static/favicon.ico">
+  <script src="/static/htmx.1.9.9.min.js"></script>
+</head>
+
+<body>
+  <h1>{{ .Header }}</h1>
+
+  <button hx-post="/count" hx-swap="none">+</button>
+  <form hx-post="/message" hx-swap="none">
+    <input type="text" name="message">
+  </form>
+  <div hx-sse="connect:/events">
+    <h2>Counter:</h2>
+    <div hx-trigger="sse:new_count" hx-get="/count" hx-target="#counter" hx-swap="innerHTML">
+      <div id="counter">{{ .Count }}</div>
+    </div>
+    <h2>Messages:</h2>
+    <div hx-trigger="sse:new_message" hx-get="/message" hx-target="#messages" hx-swap="beforeend">
+      <ul id="messages"></ul>
+    </div>
+  </div>
+
+  <script>
+    document.body.addEventListener('htmx:afterSwap', function (event) {
+      event.target.querySelectorAll('.time').forEach(function (timeElement) {
+        var utcTime = timeElement.textContent;
+        var localTime = new Date(utcTime).toLocaleString();
+        timeElement.textContent = localTime;
+      });
+    });
+  </script>
+
+</body>
+
+</html>
