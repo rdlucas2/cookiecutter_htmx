@@ -20,11 +20,18 @@ var (
 	db           *sql.DB
 )
 
-func initDB() {
+func initDB(isLocal bool) {
 	var err error
-	db, err = sql.Open("sqlite3", "file:messages.db?cache=shared&mode=rwc")
-	if err != nil {
-		log.Fatal(err)
+	if isLocal {
+		db, err = sql.Open("sqlite3", ":memory:") // Use in-memory database for testing
+		if err != nil {
+			log.Fatal(err)
+		}
+	} else {
+		db, err = sql.Open("sqlite3", "file:messages.db?cache=shared&mode=rwc")
+		if err != nil {
+			log.Fatal(err)
+		}
 	}
 
 	createCountTable := `
@@ -83,13 +90,12 @@ func saveMessage(message string) error {
 
 func getLastMessage() string {
 	var message string
-	var timestamp time.Time
-	row := db.QueryRow("SELECT message, timestamp FROM messages ORDER BY id DESC LIMIT 1")
-	err := row.Scan(&message, &timestamp)
+	row := db.QueryRow("SELECT message FROM messages ORDER BY id DESC LIMIT 1")
+	err := row.Scan(&message)
 	if err != nil {
 		return "" // Return empty if no message is found
 	}
-	return fmt.Sprintf("%s: %s", timestamp.Format(time.RFC3339), message)
+	return message
 }
 
 type SSEMessage struct {
@@ -180,7 +186,7 @@ func messageHandler(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		sendSSETextMessage(getLastMessage())
+		sendSSETextMessage(message)
 		fmt.Fprintf(w, "Message received: %s", message)
 
 	case "GET":
@@ -253,7 +259,7 @@ func eventsHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
-	initDB()
+	initDB(false)
 	defer db.Close()
 	http.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir("static"))))
 	http.HandleFunc("/", indexHandler)
