@@ -157,7 +157,7 @@ func indexHandler(w http.ResponseWriter, r *http.Request) {
 		BasePageData:  base,
 		CountPageData: count,
 	}
-	renderTemplate(w, "templates/index.html", data)
+	renderTemplate(w, "templates/pages/index.html", data)
 }
 
 func countHandler(w http.ResponseWriter, r *http.Request) {
@@ -170,7 +170,7 @@ func countHandler(w http.ResponseWriter, r *http.Request) {
 		data := CountPageData{
 			Count: getCount(),
 		}
-		renderTemplate(w, "templates/count.html", data)
+		renderTemplate(w, "templates/partials/count.html", data)
 	default:
 		// Optional: Handle other HTTP methods or return an error
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -194,7 +194,7 @@ func messageHandler(w http.ResponseWriter, r *http.Request) {
 			Time:    time.Now().UTC().Format(time.RFC3339),
 			Message: getLastMessage(),
 		}
-		renderTemplate(w, "templates/message.html", data)
+		renderTemplate(w, "templates/partials/message.html", data)
 
 	default:
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)

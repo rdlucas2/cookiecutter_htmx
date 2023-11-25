@@ -1,19 +1,42 @@
 #intended to be used for local development by mounting pwd as volume
-FROM golang:1.19 as local
+FROM golang:1.19 AS local
 ENTRYPOINT ["/bin/bash"]
 
-FROM golang:1.19 as base
+FROM golang:1.19-alpine AS base
+RUN apk add --update gcc musl-dev
 WORKDIR /app
 COPY go.mod go.mod
 COPY go.sum go.sum
 COPY ./src /app/src/
+RUN CGO_ENABLED=1 GOOS=linux go build -a -installsuffix cgo -o myapp /app/src
 
-FROM base as test
-COPY ./test.sh .
-ENTRYPOINT ["./test.sh"]
+FROM base AS test
+RUN go install gotest.tools/gotestsum@latest
+RUN go get github.com/mattn/go-sqlite3
+ENTRYPOINT ["gotestsum", "--jsonfile", "/out/tests.json", "--", "-coverprofile=/out/coverage.out", "./..."]
 
-FROM base as run
+FROM base AS run
 ENTRYPOINT [ "go", "run", "." ]
 
-#TODO: compile to binary?
-#FROM base as artifact
+# Final stage
+FROM alpine AS artifact
+RUN rm -f /sbin/apk && \
+    rm -rf /etc/apk && \
+    rm -rf /lib/apk && \
+    rm -rf /usr/share/apk && \
+    rm -rf /var/lib/apk
+    
+COPY --from=base /app/myapp /home/nonroot/gohtmx
+COPY --from=base /app/src/templates /home/nonroot/templates
+EXPOSE 3000
+RUN addgroup --system nonroot && \
+    adduser --system --ingroup nonroot nonroot
+# Set the home directory for the nonroot user
+ENV HOME=/home/nonroot
+# Create the home directory and set proper permissions
+RUN chown -R nonroot:nonroot $HOME && \
+    chown -R nonroot:nonroot /tmp
+# Switch to the nonroot user
+USER nonroot
+WORKDIR /home/nonroot
+ENTRYPOINT ["./gohtmx"]
