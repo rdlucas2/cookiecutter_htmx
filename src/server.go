@@ -1,33 +1,95 @@
 package main
 
 import (
+	"database/sql"
 	"fmt"
 	"html/template"
 	"log"
 	"net/http"
 	"sync"
 	"time"
+
+	_ "github.com/mattn/go-sqlite3"
 )
 
 var (
-	count        int
 	countMutex   sync.Mutex
-	message      string
 	messageMutex sync.Mutex
 	sseClients   = make(map[chan SSEMessage]struct{})
 	sseMutex     sync.Mutex
+	db           *sql.DB
 )
 
+func initDB() {
+	var err error
+	db, err = sql.Open("sqlite3", "file:messages.db?cache=shared&mode=rwc")
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	createCountTable := `
+    CREATE TABLE IF NOT EXISTS counts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        count INTEGER NOT NULL
+    );`
+	_, err = db.Exec(createCountTable)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	createMessageTable := `
+    CREATE TABLE IF NOT EXISTS messages (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+        message TEXT
+    );`
+	_, err = db.Exec(createMessageTable)
+	if err != nil {
+		log.Fatal(err)
+	}
+}
+
 func getCount() int {
-	countMutex.Lock()
-	defer countMutex.Unlock()
+	var count int
+	row := db.QueryRow("SELECT count FROM counts ORDER BY id DESC LIMIT 1")
+	err := row.Scan(&count)
+	if err != nil {
+		return 0 // Default to 0 if no count is found
+	}
 	return count
 }
 
-func getMessage() string {
+func incrementCount() int {
+	countMutex.Lock()
+	defer countMutex.Unlock()
+	newCount := getCount() + 1
+	_, err := db.Exec("INSERT INTO counts (count) VALUES (?)", newCount)
+	if err != nil {
+		log.Fatal(err)
+	}
+	return newCount
+}
+
+func saveMessage(message string) error {
 	messageMutex.Lock()
 	defer messageMutex.Unlock()
-	return message
+
+	_, err := db.Exec("INSERT INTO messages (message) VALUES (?)", message)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func getLastMessage() string {
+	var message string
+	var timestamp time.Time
+	row := db.QueryRow("SELECT message, timestamp FROM messages ORDER BY id DESC LIMIT 1")
+	err := row.Scan(&message, &timestamp)
+	if err != nil {
+		return "" // Return empty if no message is found
+	}
+	return fmt.Sprintf("%s: %s", timestamp.Format(time.RFC3339), message)
 }
 
 type SSEMessage struct {
@@ -95,18 +157,9 @@ func indexHandler(w http.ResponseWriter, r *http.Request) {
 func countHandler(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case "POST":
-		countMutex.Lock()
-		count++
-		newCount := count
-		countMutex.Unlock()
-
+		newCount := incrementCount()
 		sendSSECountUpdate(newCount)
 		fmt.Fprintf(w, "Count is now: %v", newCount)
-
-		// data := CountPageData{
-		// 	Count: newCount,
-		// }
-		// renderTemplate(w, "templates/count.html", data)
 	case "GET":
 		data := CountPageData{
 			Count: getCount(),
@@ -121,19 +174,23 @@ func countHandler(w http.ResponseWriter, r *http.Request) {
 func messageHandler(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case "POST":
-		messageMutex.Lock()
-		message = r.FormValue("message")
-		messageMutex.Unlock()
-		sendSSETextMessage(message)
+		message := r.FormValue("message")
+		err := saveMessage(message)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		sendSSETextMessage(getLastMessage())
 		fmt.Fprintf(w, "Message received: %s", message)
+
 	case "GET":
 		data := MessagePageData{
-			Time:    time.Now().UTC().Format(time.RFC3339), // RFC3339 is a standard format that includes timezone info
-			Message: getMessage(),
+			Time:    time.Now().UTC().Format(time.RFC3339),
+			Message: getLastMessage(),
 		}
 		renderTemplate(w, "templates/message.html", data)
+
 	default:
-		// Optional: Handle other HTTP methods or return an error
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 	}
 }
@@ -196,6 +253,8 @@ func eventsHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
+	initDB()
+	defer db.Close()
 	http.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir("static"))))
 	http.HandleFunc("/", indexHandler)
 	http.HandleFunc("/count", countHandler)
